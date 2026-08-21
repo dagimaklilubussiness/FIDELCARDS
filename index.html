@@ -916,6 +916,8 @@ function renderSettings(){
         </div>
       </div>
     </div>`;
+  const settingsLogo = document.getElementById('appLogoImgSettings');
+  if(settingsLogo) settingsLogo.src = APP_LOGO_DATA_URI;
 }
 
 function saveSheetUrl(){
@@ -952,8 +954,8 @@ function closeDevModal(){ document.getElementById('devModal').classList.add('hid
 
 window.addEventListener('online', tryBackgroundSync);
 
-document.getElementById('appLogoImgHeader').src = APP_LOGO_DATA_URI;
-document.getElementById('appLogoImgSettings').src = APP_LOGO_DATA_URI;
+const headerLogo = document.getElementById('appLogoImgHeader');
+if(headerLogo) headerLogo.src = APP_LOGO_DATA_URI;
 const favicon = document.createElement('link');
 favicon.rel = 'icon'; favicon.href = APP_LOGO_DATA_URI;
 document.head.appendChild(favicon);

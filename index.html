@@ -82,6 +82,16 @@
     background:rgba(255,255,255,0.06);
     box-shadow:inset 0 0 0 1px rgba(255,255,255,0.12);
   }
+  .brand-mark{
+    width:42px;height:42px;object-fit:contain;
+    filter:drop-shadow(0 3px 6px rgba(0,0,0,0.35));
+  }
+  .dev-mark{
+    width:44px;height:34px;
+    display:flex;align-items:center;justify-content:center;
+    opacity:0.92; transition:opacity .15s ease, transform .15s ease;
+  }
+  .dev-mark:active{transform:scale(0.94); opacity:1;}
 
   /* bottom nav */
   .nav-btn{
@@ -224,16 +234,13 @@
 
   <!-- HEADER -->
   <header class="app-header text-white px-4 pt-4 pb-3 flex items-center justify-between relative z-10">
-    <div class="logo-badge overflow-hidden">
-      <img id="appLogoImgHeader" alt="FIDELCARDS logo" class="w-full h-full object-cover" />
-    </div>
+    <img id="appLogoImgHeader" alt="FIDELCARDS logo" class="brand-mark" />
     <div class="text-center leading-tight">
       <div class="font-extrabold tracking-tight text-[15px]">FIDELCARDS</div>
       <div class="fidel text-[13px] text-amber-200/90 -mt-0.5">ፊደልካርድስ</div>
     </div>
-    <button id="devLogoBtn" class="logo-badge" aria-label="About the developer">
-      <!-- Developer logo (recreated placeholder — swap src for the real uploaded PNG) -->
-      <svg width="26" height="20" viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg">
+    <button id="devLogoBtn" class="dev-mark" aria-label="About the developer">
+      <svg width="30" height="24" viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg">
         <text x="2" y="24" font-family="monospace" font-weight="700" font-size="13" fill="#E8A33D">{</text>
         <path d="M18 6 A20 24 0 0 1 18 54" stroke="#3E86B8" stroke-width="6" fill="none"/>
         <text x="30" y="22" font-family="Sora, sans-serif" font-weight="800" font-size="15" fill="white">Dag</text>
@@ -242,10 +249,10 @@
     </button>
   </header>
 
-  <!-- STREAK / SYNC STRIP -->
+  <!-- STREAK / PROGRESS STRIP -->
   <div class="px-4 py-2 flex items-center justify-between text-[11px] font-semibold text-[color:var(--slate)] bg-white/60 border-b border-black/5">
     <span id="streakLabel" class="flex items-center gap-1">🔥 <span id="streakCount">0</span> day streak</span>
-    <span id="dataSourceLabel" class="flex items-center gap-1">📶 Sample data</span>
+    <span id="levelProgressLabel" class="flex items-center gap-1">Level 1 / 1</span>
   </div>
 
   <!-- MAIN -->
@@ -298,15 +305,18 @@ const APP_LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAAF
    FIDELCARDS — state, data, storage
    ============================================================ */
 const STORAGE = {
-  progress: 'fc_progress_v1',
-  cache: 'fc_cache_v1',
-  settings: 'fc_settings_v1'
+  progress: 'fc_progress_v1'
 };
 
 const FIDEL_GLYPHS = ['ሀ','ለ','ሐ','መ','ሠ','ረ','ሰ','ሸ','ቀ','በ','ተ','ቸ'];
 
-const SAMPLE_DATA = {
-  fetchedAt: null,
+/* ============================================================
+   APP CONTENT — edit this directly, then re-upload index.html.
+   Add a card:   {level:1, en:'English word', am:'የአማርኛ ቃል', ex:'Example sentence'}
+   Set the ad:   ad: { image:'https://...jpg', link:'https://...', label:'Sponsored' }
+                 or leave ad: null to hide the banner entirely.
+   ============================================================ */
+const APP_DATA = {
   ad: null,
   cards: [
     // Level 1 — Greetings
@@ -371,9 +381,8 @@ const SAMPLE_DATA = {
   ]
 };
 
-let DATA = null;           // active dataset (from cache or sample)
+let DATA = APP_DATA;        // active dataset — edit APP_DATA above to change content
 let progress = null;       // user progress object
-let settings = null;       // sheet url etc
 let currentTab = 'learn';
 let learnView = { screen:'map', level:null, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
 let reviewFilter = 'all';
@@ -402,9 +411,7 @@ function defaultProgress(){
 }
 
 function initState(){
-  DATA = loadJSON(STORAGE.cache, null) || SAMPLE_DATA;
   progress = loadJSON(STORAGE.progress, null) || defaultProgress();
-  settings = loadJSON(STORAGE.settings, null) || {sheetUrl:''};
 
   // streak bookkeeping
   const today = new Date().toDateString();
@@ -414,88 +421,6 @@ function initState(){
     progress.lastVisit = today;
     saveJSON(STORAGE.progress, progress);
   }
-}
-
-/* ============================================================
-   Google Sheet sync (free, no backend)
-   Expected columns in row 1 (exact header names):
-   Type | Level | English | Amharic | Example | ImageURL | Link
-   - rows with Type = "ad" (or Type=Ad) populate the banner ad
-   - all other rows are treated as flashcards
-   ============================================================ */
-function extractSheetId(input){
-  if(!input) return null;
-  const m = input.match(/\/d\/([a-zA-Z0-9-_]+)/);
-  if(m) return m[1];
-  if(/^[a-zA-Z0-9-_]{20,}$/.test(input.trim())) return input.trim();
-  return null;
-}
-
-async function syncFromSheet(showStatus){
-  const id = extractSheetId(settings.sheetUrl);
-  const statusEl = document.getElementById('syncStatus');
-  if(!id){
-    if(showStatus && statusEl) statusEl.textContent = 'Add a valid Google Sheet link first.';
-    return false;
-  }
-  if(showStatus && statusEl) statusEl.textContent = 'Syncing…';
-  try{
-    const url = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:json&t=${Date.now()}`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('Network response was not ok');
-    const text = await res.text();
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
-    const json = JSON.parse(text.substring(jsonStart, jsonEnd+1));
-    const table = json.table;
-    if(!table || !table.rows || !table.rows.length) throw new Error('Sheet looks empty');
-
-    // Build header map — prefer gviz col labels, fall back to first row values
-    let headers = table.cols.map(c => (c.label||'').trim());
-    let rows = table.rows;
-    const hasLabels = headers.some(h => h.length>0);
-    if(!hasLabels){
-      headers = (rows[0].c||[]).map(c => (c && c.v ? String(c.v).trim() : ''));
-      rows = rows.slice(1);
-    }
-    const idx = name => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
-    const iType = idx('Type'), iLevel = idx('Level'), iEn = idx('English'),
-          iAm = idx('Amharic'), iEx = idx('Example'), iImg = idx('ImageURL'), iLink = idx('Link');
-
-    const cards = [];
-    let ad = null;
-    rows.forEach(r => {
-      const c = r.c || [];
-      const val = i => (i>=0 && c[i] && c[i].v !== null && c[i].v !== undefined) ? String(c[i].v).trim() : '';
-      const type = val(iType).toLowerCase();
-      if(type === 'ad'){
-        ad = { label: val(iEn) || 'Sponsored', image: val(iImg), link: val(iLink) };
-      } else {
-        const en = val(iEn), am = val(iAm);
-        const lvl = parseInt(val(iLevel), 10);
-        if(en && am && !isNaN(lvl)){
-          cards.push({ level: lvl, en, am, ex: val(iEx) });
-        }
-      }
-    });
-
-    if(!cards.length) throw new Error('No valid flashcard rows found');
-
-    DATA = { fetchedAt: Date.now(), ad, cards };
-    saveJSON(STORAGE.cache, DATA);
-    if(showStatus && statusEl) statusEl.textContent = `Synced ${cards.length} cards ✓`;
-    renderAll();
-    return true;
-  }catch(err){
-    if(showStatus && statusEl) statusEl.textContent = 'Could not sync — using saved data. (' + err.message + ')';
-    return false;
-  }
-}
-
-function tryBackgroundSync(){
-  if(!navigator.onLine) return;
-  if(!extractSheetId(settings.sheetUrl)) return;
-  syncFromSheet(false);
 }
 
 /* ---------- derived data helpers ---------- */
@@ -522,17 +447,9 @@ function renderAll(){
 
 function renderStrip(){
   document.getElementById('streakCount').textContent = progress.streak;
-  const src = document.getElementById('dataSourceLabel');
-  src.innerHTML = DATA.fetchedAt
-    ? `📶 Synced ${timeAgo(DATA.fetchedAt)}`
-    : `📄 Sample data`;
-}
-function timeAgo(ts){
-  const s = Math.floor((Date.now()-ts)/1000);
-  if(s<60) return 'just now';
-  if(s<3600) return Math.floor(s/60)+'m ago';
-  if(s<86400) return Math.floor(s/3600)+'h ago';
-  return Math.floor(s/86400)+'d ago';
+  const lv = levels();
+  const doneCount = progress.unlockedLevels.length;
+  document.getElementById('levelProgressLabel').textContent = `Level ${Math.min(doneCount, lv.length)} / ${lv.length}`;
 }
 
 function renderAdBanner(){
@@ -884,16 +801,6 @@ function renderSettings(){
       <h1 class="text-xl font-extrabold text-[color:var(--ink)] mb-4">Settings</h1>
 
       <div class="bg-white rounded-2xl p-4 mb-4 shadow-[0_3px_0_0_#E1DAC7]">
-        <div class="font-bold text-[14px] mb-1">Cloud sync</div>
-        <p class="text-[12px] text-[color:var(--slate)] mb-3">Paste your published Google Sheet link. Row 1 headers: <span class="font-mono text-[11px]">Type, Level, English, Amharic, Example, ImageURL, Link</span>. Use <span class="font-mono text-[11px]">Type=ad</span> for the banner row.</p>
-        <input type="url" id="sheetUrlInput" placeholder="https://docs.google.com/spreadsheets/d/…" value="${escapeAttr(settings.sheetUrl)}" class="mb-2" />
-        <div class="flex gap-2">
-          <button onclick="saveSheetUrl()" class="btn-primary flex-1 py-2.5 rounded-xl text-[13px]">Save &amp; sync now</button>
-        </div>
-        <div id="syncStatus" class="text-[12px] mt-2 text-[color:var(--slate)] font-semibold"></div>
-      </div>
-
-      <div class="bg-white rounded-2xl p-4 mb-4 shadow-[0_3px_0_0_#E1DAC7]">
         <div class="font-bold text-[14px] mb-3">Your progress</div>
         <div class="flex items-center justify-between text-[13px] mb-2">
           <span class="text-[color:var(--slate)]">Levels unlocked</span>
@@ -907,9 +814,7 @@ function renderSettings(){
       </div>
 
       <div class="bg-white rounded-2xl p-4 shadow-[0_3px_0_0_#E1DAC7] flex items-center gap-3">
-        <div class="logo-badge overflow-hidden" style="background:var(--ink)">
-          <img id="appLogoImgSettings" alt="FIDELCARDS logo" class="w-full h-full object-cover" />
-        </div>
+        <img id="appLogoImgSettings" alt="FIDELCARDS logo" class="w-11 h-11 object-contain" />
         <div>
           <div class="font-bold text-[13px]">FIDELCARDS ፊደልካርድስ</div>
           <div class="text-[12px] text-[color:var(--slate)]">v1.0 · Made by Dag Dev</div>
@@ -920,12 +825,6 @@ function renderSettings(){
   if(settingsLogo) settingsLogo.src = APP_LOGO_DATA_URI;
 }
 
-function saveSheetUrl(){
-  const val = document.getElementById('sheetUrlInput').value.trim();
-  settings.sheetUrl = val;
-  saveJSON(STORAGE.settings, settings);
-  syncFromSheet(true);
-}
 function resetProgress(){
   if(!confirm('This clears all unlocked levels and scores. Continue?')) return;
   progress = defaultProgress();
@@ -952,8 +851,6 @@ document.getElementById('devLogoBtn').addEventListener('click', () => {
 });
 function closeDevModal(){ document.getElementById('devModal').classList.add('hidden'); }
 
-window.addEventListener('online', tryBackgroundSync);
-
 const headerLogo = document.getElementById('appLogoImgHeader');
 if(headerLogo) headerLogo.src = APP_LOGO_DATA_URI;
 const favicon = document.createElement('link');
@@ -965,7 +862,6 @@ document.head.appendChild(touchIcon);
 
 initState();
 renderAll();
-tryBackgroundSync();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FIDELCARDS Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore-compat.js"></script>
+<style>
+  :root{ --ink:#142F4C; --blue:#1D5C8A; --gold:#E8A33D; --gold-deep:#C97F1E; --cream:#FBF6EC; --success:#2F9E5B; --danger:#C4573B; --slate:#7C8798; }
+  *{box-sizing:border-box;}
+  body{font-family:system-ui,-apple-system,sans-serif; background:var(--cream); color:#1B2430; margin:0; padding:20px;}
+  .wrap{max-width:720px; margin:0 auto;}
+  .card{background:white; border-radius:16px; padding:20px; margin-bottom:18px; box-shadow:0 3px 0 0 #E1DAC7;}
+  h1{font-size:22px; font-weight:800; color:var(--ink); margin:0 0 4px;}
+  h2{font-size:15px; font-weight:800; color:var(--ink); margin:0 0 12px;}
+  .sub{color:var(--slate); font-size:13px; margin-bottom:20px;}
+  input, textarea{width:100%; padding:10px 12px; border-radius:10px; border:1.5px solid #E1DAC7; font-size:14px; margin-bottom:10px; font-family:inherit;}
+  textarea{resize:vertical; min-height:70px;}
+  button{cursor:pointer; border:none; font-family:inherit;}
+  .btn-primary{background:linear-gradient(160deg,var(--gold),var(--gold-deep)); color:#2A1B03; font-weight:700; padding:10px 18px; border-radius:10px; font-size:14px;}
+  .btn-danger{background:#FBE3DC; color:var(--danger); font-weight:700; padding:6px 12px; border-radius:8px; font-size:12px;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{text-align:left; color:var(--slate); font-size:11px; text-transform:uppercase; padding:6px 8px; border-bottom:2px solid #F0EADB;}
+  td{padding:8px; border-bottom:1px solid #F5F1E6;}
+  .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;}
+  .pill.online{background:#DFF6E7; color:#1B5E38;}
+  .pill.offline{background:#F0EADB; color:var(--slate);}
+  .ann-item{padding:10px 0; border-bottom:1px solid #F5F1E6; display:flex; justify-content:space-between; align-items:start; gap:10px;}
+  .ann-item:last-child{border-bottom:none;}
+  #gate{position:fixed; inset:0; background:var(--ink); display:flex; align-items:center; justify-content:center; z-index:100;}
+  #gate .box{background:white; border-radius:16px; padding:28px; max-width:320px; width:90%; text-align:center;}
+  .status{font-size:12px; margin-top:8px; font-weight:600;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div style="font-size:32px; margin-bottom:10px;">🔐</div>
+    <h2 style="text-align:center;">Admin Access</h2>
+    <input type="password" id="adminPassword" placeholder="Admin password" onkeydown="if(event.key==='Enter') checkPassword()" />
+    <button class="btn-primary" style="width:100%;" onclick="checkPassword()">Enter</button>
+    <div id="gateStatus" class="status" style="color:var(--danger);"></div>
+  </div>
+</div>
+
+<div class="wrap" id="adminApp" style="display:none;">
+  <h1>FIDELCARDS Admin</h1>
+  <p class="sub">Post announcements and monitor your learners. Changes here appear live in the app's Inbox tab.</p>
+
+  <div class="card">
+    <h2>Your admin UID</h2>
+    <p class="sub" style="margin-bottom:8px;">First time here? Copy this UID and add it as a document in the <code>admins</code> Firestore collection (doc ID = this UID) so the security rules recognize you as admin.</p>
+    <div id="myUidBox" style="font-family:monospace; background:#F0EADB; padding:10px; border-radius:10px; font-size:12px; word-break:break-all;">Connecting…</div>
+  </div>
+
+  <div class="card">
+    <h2>📢 Post an announcement</h2>
+    <input type="text" id="annTitle" placeholder="Title (e.g. New levels added!)" />
+    <textarea id="annBody" placeholder="What do you want learners to know?"></textarea>
+    <button class="btn-primary" onclick="postAnnouncement()">Publish</button>
+    <div id="annStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent announcements</h2>
+    <div id="annList"><p class="sub">Loading…</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Users (<span id="userCount">0</span>)</h2>
+    <p class="sub">Sorted by streak. "Online" means active in the last 2 minutes.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Name</th><th>Streak</th><th>Levels done</th><th>Candles</th><th>Status</th></tr></thead>
+        <tbody id="usersTableBody"><tr><td colspan="5" class="sub">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ⚠️ Change this before publishing your repo — this is a basic deterrent, not real security.
+const ADMIN_PASSWORD = 'fidelcards2026';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBtk5cx_jpjd7LTkz--ASc7uzbkU3s9ENA",
+  authDomain: "fidelcards-b7f50.firebaseapp.com",
+  projectId: "fidelcards-b7f50",
+  storageBucket: "fidelcards-b7f50.firebasestorage.app",
+  messagingSenderId: "918675407822",
+  appId: "1:918675407822:web:96be7ca8e84ac4a993e19f"
+};
+
+let db = null;
+let uid = null;
+
+function checkPassword(){
+  const val = document.getElementById('adminPassword').value;
+  if(val === ADMIN_PASSWORD){
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('adminApp').style.display = 'block';
+    initAdmin();
+  } else {
+    document.getElementById('gateStatus').textContent = 'Wrong password.';
+  }
+}
+
+function initAdmin(){
+  if(typeof firebase === 'undefined'){
+    document.getElementById('myUidBox').textContent = 'Firebase failed to load — check your internet connection.';
+    return;
+  }
+  try{
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    firebase.auth().onAuthStateChanged(user => {
+      if(user){
+        uid = user.uid;
+        document.getElementById('myUidBox').textContent = uid;
+        loadAnnouncements();
+        loadUsers();
+      }
+    });
+    firebase.auth().signInAnonymously().catch(e => {
+      document.getElementById('myUidBox').textContent = 'Sign-in failed: ' + e.message;
+    });
+  }catch(e){
+    document.getElementById('myUidBox').textContent = 'Firebase init failed: ' + e.message;
+  }
+}
+
+async function postAnnouncement(){
+  const title = document.getElementById('annTitle').value.trim();
+  const body = document.getElementById('annBody').value.trim();
+  const status = document.getElementById('annStatus');
+  if(!title || !body){
+    status.textContent = 'Fill in both title and body.';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+  status.textContent = 'Publishing…';
+  status.style.color = 'var(--slate)';
+  try{
+    await db.collection('announcements').add({ title, body, ts: Date.now() });
+    document.getElementById('annTitle').value = '';
+    document.getElementById('annBody').value = '';
+    status.textContent = 'Published ✓';
+    status.style.color = 'var(--success)';
+    loadAnnouncements();
+  }catch(e){
+    status.textContent = 'Failed: ' + e.message + ' (did you add your UID to the admins collection?)';
+    status.style.color = 'var(--danger)';
+  }
+}
+
+async function loadAnnouncements(){
+  const list = document.getElementById('annList');
+  try{
+    const snap = await db.collection('announcements').orderBy('ts','desc').limit(20).get();
+    if(snap.empty){
+      list.innerHTML = '<p class="sub">No announcements yet.</p>';
+      return;
+    }
+    list.innerHTML = snap.docs.map(d => {
+      const a = d.data();
+      return `<div class="ann-item">
+        <div><strong>${escapeHtml(a.title||'')}</strong><br><span class="sub">${escapeHtml(a.body||'')}</span></div>
+        <button class="btn-danger" onclick="deleteAnnouncement('${d.id}')">Delete</button>
+      </div>`;
+    }).join('');
+  }catch(e){
+    list.innerHTML = '<p class="sub" style="color:var(--danger);">Could not load: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+async function deleteAnnouncement(id){
+  if(!confirm('Delete this announcement?')) return;
+  try{
+    await db.collection('announcements').doc(id).delete();
+    loadAnnouncements();
+  }catch(e){ alert('Delete failed: ' + e.message); }
+}
+
+async function loadUsers(){
+  const tbody = document.getElementById('usersTableBody');
+  try{
+    const snap = await db.collection('users').orderBy('streak','desc').limit(100).get();
+    document.getElementById('userCount').textContent = snap.size;
+    if(snap.empty){
+      tbody.innerHTML = '<tr><td colspan="5" class="sub">No users yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = snap.docs.map(d => {
+      const u = d.data();
+      const online = u.lastActive && (Date.now() - u.lastActive) < 120000;
+      return `<tr>
+        <td>${escapeHtml(u.name || 'Anonymous')}</td>
+        <td>🔥 ${u.streak || 0}</td>
+        <td>${u.completedLevels || 0}</td>
+        <td>🕯️ ${u.candles !== undefined ? u.candles : '—'}</td>
+        <td><span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span></td>
+      </tr>`;
+    }).join('');
+  }catch(e){
+    tbody.innerHTML = '<tr><td colspan="5" class="sub" style="color:var(--danger);">Could not load: ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+</script>
+</body>
+</html>

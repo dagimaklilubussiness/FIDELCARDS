@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fidelcards-v8';
+const CACHE_NAME = 'fidelcards-v13';
 const ASSETS = ['./index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {

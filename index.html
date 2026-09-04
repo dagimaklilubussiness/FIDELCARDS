@@ -1866,7 +1866,28 @@ function renderProfile(){
           <div class="text-[12px] text-[color:var(--slate)]">v1.0 · Made by Dag Dev</div>
         </div>
       </div>
-    </div>`;
+<!-- Download APK Button -->
+<div style="text-align: center; margin: 25px 0;">
+    <a href="./FIDELCARDS.apk" download="FIDELCARDS.apk" style="
+        display: inline-flex;
+        align-items: center;
+        background-color: #A4C639; /* Android Green */
+        color: #ffffff;
+        padding: 14px 28px;
+        font-size: 16px;
+        font-weight: bold;
+        text-decoration: none;
+        border-radius: 30px;
+        box-shadow: 0 4px 15px rgba(164, 198, 57, 0.3);
+        transition: transform 0.2s, box-shadow 0.2s;
+    " onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(164, 198, 57, 0.5)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 15px rgba(164, 198, 57, 0.3)';">
+        <!-- Modern Android Icon -->
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 12px;">
+            <path d="M16.6 14c-.52 0-.95-.43-.95-.95s.43-.95.95-.95.95.43.95.95-.43.95-.95.95m-9.2 0c-.52 0-.95-.43-.95-.95s.43-.95.95-.95.95.43.95.95-.43.95-.95.95M12 21.5c-4.42 0-8-3.58-8-8 0-3.3 2-6.14 4.88-7.33l-1.15-2a.49.49 0 0 1 .18-.68.49.49 0 0 1 .68.18l1.16 2.02A7.95 7.95 0 0 1 12 5.5c.87 0 1.7.14 2.45.4l1.16-2.02a.49.49 0 0 1 .68-.18.49.49 0 0 1 .18.68l-1.15 2C18 7.36 20 10.2 20 13.5c0 4.42-3.58 8-8 8"/>
+        </svg>
+        Download Android App (.APK)
+    </a>
+</div>
 
   const settingsLogo = document.getElementById('appLogoImgSettings');
   if(settingsLogo) settingsLogo.src = APP_LOGO_DATA_URI;

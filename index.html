@@ -449,6 +449,7 @@ let cloudUid = null;
 let cloudReady = false;
 let friendsCache = [];
 let myFriendCode = null;
+let suppressNextPush = false;
 
 function initCloud(){
   if(!firebaseAvailable) return;
@@ -459,7 +460,14 @@ function initCloud(){
     cloudAuth.onAuthStateChanged(user => {
       if(user){
         cloudUid = user.uid;
-        ensureUserDoc().then(() => { cloudReady = true; pushProgressToCloud(); refreshFriendsUI(); startPresenceHeartbeat(); });
+        ensureUserDoc().then(() => {
+          cloudReady = true;
+          if(suppressNextPush){ suppressNextPush = false; }
+          else { pushProgressToCloud(); }
+          refreshFriendsUI();
+          startPresenceHeartbeat();
+          refreshUidDisplay();
+        });
       }
     });
     cloudAuth.signInAnonymously().catch(() => {});
@@ -516,6 +524,8 @@ function pushProgressToCloud(){
       candleRefillAt: progress ? progress.candleRefillAt : null,
       notifiedTiers: progress ? progress.notifiedTiers : [],
       examsPassed: progress ? progress.examsPassed : [],
+      customCards: customCards || [],
+      myProgressData: myProgress || null,
       lastSync: Date.now(),
       lastActive: Date.now()
     }, { merge:true });
@@ -537,8 +547,12 @@ async function pullProgressFromCloud(){
     if(d.notifiedTiers) progress.notifiedTiers = d.notifiedTiers;
     if(d.examsPassed) progress.examsPassed = d.examsPassed;
     if(d.name) profile.name = d.name;
+    if(d.customCards) customCards = d.customCards;
+    if(d.myProgressData) myProgress = d.myProgressData;
     saveJSON(STORAGE.progress, progress);
     saveJSON(STORAGE.profile, profile);
+    saveJSON(STORAGE.customCards, customCards);
+    saveJSON(STORAGE.myProgress, myProgress);
     return true;
   }catch(e){ return false; }
 }
@@ -571,11 +585,13 @@ async function signInExisting(email, password){
   if(!cloudAuth) return { ok:false, msg:'Cloud not ready — check your connection.' };
   if(!email || !password) return { ok:false, msg:'Enter your email and password.' };
   try{
+    suppressNextPush = true;
     await cloudAuth.signInWithEmailAndPassword(email, password);
     const restored = await pullProgressFromCloud();
     renderAll();
     return { ok:true, msg: restored ? 'Signed in — your progress has been restored!' : 'Signed in!' };
   }catch(e){
+    suppressNextPush = false;
     return { ok:false, msg: (e && e.message) ? e.message : 'Sign-in failed — check your email and password.' };
   }
 }
@@ -1052,6 +1068,7 @@ let pendingProfilePic;     // holds a newly-picked (not yet saved) profile pic
 let currentTab = 'learn';
 let learnView = { screen:'map', level:null, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
 let currentMapGroup = null; // which "world" of 10 levels is showing on the map
+let lastViewedLevel = null; // the level the user most recently studied/tested — highlighted on the map
 let showExam = false;
 let examView = { threshold:null, questions:null, index:0, answers:[] };
 let showChat = false;
@@ -1204,7 +1221,12 @@ function escapeHTML(s){
    ============================================================ */
 function renderLearn(){
   const main = document.getElementById('mainArea');
-  if(learnView.screen === 'map'){ main.innerHTML = mapHTML(); return; }
+  if(learnView.screen === 'map'){
+    main.innerHTML = mapHTML();
+    const node = document.getElementById('lastViewedNode');
+    if(node) setTimeout(() => node.scrollIntoView({ block:'center', behavior:'auto' }), 0);
+    return;
+  }
   if(learnView.screen === 'study'){ main.innerHTML = studyHTML(); attachStudyHandlers(); return; }
   if(learnView.screen === 'test'){ main.innerHTML = testHTML(); attachTestHandlers(); return; }
 }
@@ -1244,13 +1266,15 @@ function mapHTML(){
     const i = currentMapGroup * groupSize + iInGroup;
     const unlocked = isUnlocked(lvl);
     const completed = isCompleted(lvl);
+    const isLastViewed = lvl === lastViewedLevel;
     const glyph = FIDEL_GLYPHS[i % FIDEL_GLYPHS.length];
     const offset = (iInGroup % 2 === 0) ? 'ml-2' : 'mr-2 self-end';
     const stateClass = completed ? 'done' : (unlocked ? 'unlocked' : 'locked');
     const score = progress.bestScores[lvl];
     return `
-      <div class="flex flex-col items-center ${offset === 'mr-2 self-end' ? 'self-end mr-6' : 'ml-6'} my-3 relative" style="width:80px;">
-        <button onclick="openLevel(${lvl})" class="level-node ${stateClass}" ${unlocked ? '' : 'disabled'}>
+      <div class="flex flex-col items-center ${offset === 'mr-2 self-end' ? 'self-end mr-6' : 'ml-6'} my-3 relative" style="width:80px;" ${isLastViewed ? `id="lastViewedNode"` : ''}>
+        ${isLastViewed ? `<div class="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap" style="background:var(--ink); color:white; z-index:2;">You were here</div>` : ''}
+        <button onclick="openLevel(${lvl})" class="level-node ${stateClass}" ${unlocked ? '' : 'disabled'} style="${isLastViewed ? 'box-shadow:0 0 0 3px var(--gold), 0 6px 14px -4px rgba(201,127,30,0.6);' : ''}">
           ${completed ? `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
             : (unlocked ? `<span class="fidel fidel-glyph">${glyph}</span>` : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9B937C" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`)}
         </button>
@@ -1444,6 +1468,10 @@ function openLevel(lvl){
 }
 
 function backToMap(){
+  if(learnView.level){
+    lastViewedLevel = learnView.level;
+    currentMapGroup = Math.floor((learnView.level - 1) / 10);
+  }
   learnView.screen = 'map';
   renderLearn();
 }
@@ -1857,6 +1885,10 @@ function renderProfile(){
         <input type="password" id="accountPassword" placeholder="Password (6+ characters)" class="mb-3" />
         <button onclick="handleAccountAction()" id="accountActionBtn" class="btn-primary w-full py-2.5 rounded-xl text-[13px]">Secure my account</button>
         <div id="accountStatus" class="text-[11px] mt-2 hidden text-center"></div>
+        <div class="border-t border-black/5 mt-3 pt-3">
+          <div class="text-[10px] font-bold text-[color:var(--slate)] uppercase mb-1">This account's ID (for recovery)</div>
+          <button onclick="copyMyUid()" id="myUidBox" class="w-full text-left font-mono text-[11px] text-[color:var(--ink)] bg-[#F0EADB] rounded-xl px-3 py-2 break-all">Connecting…</button>
+        </div>
       </div>
 
       <div class="bg-white rounded-2xl p-4 shadow-[0_3px_0_0_#E1DAC7] flex items-center gap-3">
@@ -1871,6 +1903,7 @@ function renderProfile(){
   const settingsLogo = document.getElementById('appLogoImgSettings');
   if(settingsLogo) settingsLogo.src = APP_LOGO_DATA_URI;
   document.getElementById('profilePicInput').addEventListener('change', handleProfilePicChange);
+  refreshUidDisplay();
 }
 
 let accountMode = 'secure';
@@ -1909,6 +1942,26 @@ async function handleAccountAction(){
 
   status.textContent = result.msg;
   status.style.color = result.ok ? 'var(--success)' : 'var(--danger)';
+  refreshUidDisplay();
+}
+
+function refreshUidDisplay(){
+  const box = document.getElementById('myUidBox');
+  if(!box) return;
+  box.textContent = cloudUid || 'Connecting…';
+}
+
+function copyMyUid(){
+  if(!cloudUid){
+    showToast('Still connecting — try again in a moment.');
+    return;
+  }
+  const done = () => showToast('Account ID copied.');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(cloudUid).then(done).catch(() => fallbackCopy(cloudUid, done));
+  } else {
+    fallbackCopy(cloudUid, done);
+  }
 }
 
 function toggleEditProfile(){
@@ -2371,6 +2424,24 @@ lv.3 = Fast = ፈጣን" class="mt-1 mb-3 fidel" style="width:100%; background:w
         <div id="myCardStatus" class="text-[12px] mt-2 text-[color:var(--danger)] font-semibold hidden"></div>
       </div>
 
+      <div class="bg-white rounded-2xl p-4 mb-4 shadow-[0_3px_0_0_#E1DAC7]">
+        <div class="font-bold text-[14px] mb-2">💾 Backup & restore</div>
+        <p class="text-[11px] text-[color:var(--slate)] mb-3">Your cards sync to the cloud automatically, but keep a text backup too — paste it into the Bulk box above to restore on any account or device.</p>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <button onclick="exportMyCards()" class="btn-ghost py-2.5 rounded-xl text-[13px]">📤 Export as text</button>
+          <button onclick="document.getElementById('importBox').classList.toggle('hidden')" class="btn-ghost py-2.5 rounded-xl text-[13px]">📥 Import backup</button>
+        </div>
+        <div id="importBox" class="hidden mt-2">
+          <textarea id="importTextarea" rows="6" placeholder="Paste your lv.N = word = meaning = example backup here" class="mb-2 fidel" style="width:100%; background:white; border-radius:14px; padding:12px 14px; box-shadow:inset 0 0 0 1.5px #E1DAC7; font-size:13px; resize:vertical;"></textarea>
+          <button onclick="importMyCardsBackup()" class="btn-primary w-full py-2.5 rounded-xl text-[13px]">Restore these cards</button>
+        </div>
+        <div id="exportBox" class="hidden mt-3">
+          <label class="text-[10px] font-bold text-[color:var(--slate)] uppercase">Your backup — copy this somewhere safe</label>
+          <textarea id="exportTextarea" rows="6" readonly class="mt-1 fidel" style="width:100%; background:#F0EADB; border-radius:14px; padding:12px 14px; font-size:12px; resize:vertical;"></textarea>
+          <button onclick="copyExportText()" class="btn-ghost w-full py-2 rounded-xl text-[12px] mt-2">📋 Copy to clipboard</button>
+        </div>
+      </div>
+
       ${levelNums.length === 0 ? `
         <div class="text-center text-[color:var(--slate)] py-8">
           <div class="text-3xl mb-2">✏️</div>
@@ -2396,6 +2467,82 @@ lv.3 = Fast = ፈጣን" class="mt-1 mb-3 fidel" style="width:100%; background:w
     </div>`;
 
   window.__customCardsFlat = customCards;
+}
+
+function exportMyCards(){
+  if(!customCards.length){
+    showToast('No cards to export yet.');
+    return;
+  }
+  const lines = customCards.map(c => {
+    const parts = [`lv.${c.level}`, c.en, c.am];
+    if(c.ex) parts.push(c.ex);
+    return parts.join(' = ');
+  });
+  const text = lines.join('\n');
+  const box = document.getElementById('exportBox');
+  const ta = document.getElementById('exportTextarea');
+  if(box && ta){
+    ta.value = text;
+    box.classList.remove('hidden');
+  }
+}
+
+function copyExportText(){
+  const ta = document.getElementById('exportTextarea');
+  if(!ta) return;
+  const done = () => showToast('Copied! Paste it somewhere safe — a notes app, Telegram Saved Messages, anywhere.');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(ta.value).then(done).catch(() => fallbackCopy(ta.value, done));
+  } else {
+    fallbackCopy(ta.value, done);
+  }
+}
+
+function importMyCardsBackup(){
+  const raw = document.getElementById('importTextarea').value;
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if(!lines.length){
+    showToast('Paste your backup text first.');
+    return;
+  }
+  const lvPattern = /^lv\.?\s*(\d+)\s*=\s*(.*)$/i;
+  const added = [];
+  const skipped = [];
+  const levelCounts = {};
+  customCards.forEach(c => { levelCounts[c.level] = (levelCounts[c.level]||0) + 1; });
+
+  lines.forEach(line => {
+    const match = line.match(lvPattern);
+    if(!match){ skipped.push(line); return; }
+    const level = parseInt(match[1], 10);
+    const parts = match[2].split('=').map(p => p.trim());
+    const en = parts[0] || '';
+    const am = parts[1] || '';
+    const ex = parts[2] || '';
+    if(level >= 1 && en && am){
+      const current = levelCounts[level] || 0;
+      if(current >= 10){ skipped.push(line); return; }
+      levelCounts[level] = current + 1;
+      added.push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2,7), level, en, am, ex });
+    } else {
+      skipped.push(line);
+    }
+  });
+
+  if(!added.length){
+    showToast('No valid lines found in that backup.');
+    return;
+  }
+
+  customCards.push(...added);
+  saveJSON(STORAGE.customCards, customCards);
+  pushProgressToCloud();
+  document.getElementById('importTextarea').value = '';
+  document.getElementById('importBox').classList.add('hidden');
+  renderMyCardsAdd();
+  ensureMyProgressInit();
+  showToast(`Restored ${added.length} card(s)${skipped.length ? `, skipped ${skipped.length}` : ''}.`);
 }
 
 function copyAiPrompt(){
@@ -2463,6 +2610,7 @@ function addCustomCard(){
     level: levelVal, en, am, ex
   });
   saveJSON(STORAGE.customCards, customCards);
+  pushProgressToCloud();
 
   document.getElementById('myCardLevel').value = '';
   document.getElementById('myCardEn').value = '';
@@ -2527,6 +2675,7 @@ function addBulkCards(){
 
   customCards.push(...added);
   saveJSON(STORAGE.customCards, customCards);
+  pushProgressToCloud();
 
   document.getElementById('myCardBulk').value = '';
   renderMyCardsAdd(); ensureMyProgressInit();
@@ -2547,6 +2696,7 @@ function deleteCustomCard(id){
   if(!confirm('Delete this flashcard? This cannot be undone.')) return;
   customCards = customCards.filter(c => c.id !== id);
   saveJSON(STORAGE.customCards, customCards);
+  pushProgressToCloud();
   renderMyCardsAdd(); ensureMyProgressInit();
 }
 

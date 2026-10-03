@@ -406,7 +406,8 @@ const STORAGE = {
   progress: 'fc_progress_v1',
   profile: 'fc_profile_v1',
   customCards: 'fc_custom_cards_v1',
-  myProgress: 'fc_my_progress_v1'
+  myProgress: 'fc_my_progress_v1',
+  myLastLevel: 'fc_my_last_level_v1'   // device-only; deliberately NOT part of the cloud payload
 };
 
 const FIDEL_GLYPHS = ['ሀ','ለ','ሐ','መ','ሠ','ረ','ሰ','ሸ','ቀ','በ','ተ','ቸ'];
@@ -1079,6 +1080,7 @@ let settingsView = 'main'; // 'main' | 'mycards' (legacy, unused now but kept fo
 let myCardMode = 'single'; // 'single' | 'bulk'
 let myProgress = null;     // gamified progress for custom levels
 let showMyCards = false;   // true when the My Cards learn flow is open
+let myLastViewedLevel = null; // last My Cards level opened — persisted locally so it survives reloads
 let myLearnView = { screen:'map', level:null, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
 
 /* ---------- storage helpers ---------- */
@@ -1134,6 +1136,7 @@ function initState(){
   pendingProfilePic = profile.pic;
   customCards = loadJSON(STORAGE.customCards, null) || [];
   myProgress = loadJSON(STORAGE.myProgress, null) || defaultMyProgress();
+  myLastViewedLevel = loadJSON(STORAGE.myLastLevel, null);
 
   // restore where the user last was on the map — survives reloads and accidental back-navigation
   lastViewedLevel = progress.lastViewedLevel || null;
@@ -2088,6 +2091,12 @@ function ensureMyProgressInit(){
   }
 }
 
+function setMyLastViewed(lvl){
+  if(!lvl) return;
+  myLastViewedLevel = lvl;
+  saveJSON(STORAGE.myLastLevel, lvl);
+}
+
 function openMyCardsLearn(){
   showMyCards = true;
   myLearnView = { screen:'map', level:null, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
@@ -2127,9 +2136,11 @@ function renderMyMap(){
     const offset = (i % 2 === 0) ? 'ml-6' : 'mr-6 self-end';
     const stateClass = completed ? 'done' : (unlocked ? 'unlocked' : 'locked');
     const score = myProgress.bestScores[lvl];
+    const isLast = lvl === myLastViewedLevel && unlocked;
     return `
-      <div class="flex flex-col items-center ${offset} my-3 relative" style="width:80px;">
-        <button onclick="openMyLevel(${lvl})" class="level-node ${stateClass}" ${unlocked ? '' : 'disabled'}>
+      <div class="flex flex-col items-center ${offset} my-3 relative" style="width:80px;" ${isLast ? `id="myLastViewedNode"` : ''}>
+        ${isLast ? `<div class="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap" style="background:var(--ink); color:white; z-index:2;">You were here</div>` : ''}
+        <button onclick="openMyLevel(${lvl})" class="level-node ${stateClass}" ${unlocked ? '' : 'disabled'} style="${isLast ? 'box-shadow:0 0 0 3px var(--gold), 0 6px 14px -4px rgba(201,127,30,0.6);' : ''}">
           ${completed ? `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`
             : (unlocked ? `<span class="fidel fidel-glyph">${glyph}</span>` : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9B937C" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`)}
         </button>
@@ -2165,14 +2176,21 @@ function renderMyMap(){
         <div class="relative pb-6">${path}</div>
       `}
     </div>`;
+  const lastNode = document.getElementById('myLastViewedNode');
+  if(lastNode) setTimeout(() => lastNode.scrollIntoView({ block:'center', behavior:'auto' }), 0);
 }
 
 function openMyLevel(lvl){
   if(!isMyUnlocked(lvl)) return;
+  setMyLastViewed(lvl);
   myLearnView = { screen:'study', level:lvl, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
   renderAll();
 }
-function backToMyMap(){ myLearnView.screen = 'map'; renderAll(); }
+function backToMyMap(){
+  if(myLearnView.level) setMyLastViewed(myLearnView.level);
+  myLearnView.screen = 'map';
+  renderAll();
+}
 
 function renderMyStudy(){
   const main = document.getElementById('mainArea');

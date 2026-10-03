@@ -1106,7 +1106,8 @@ function defaultProgress(){
     candles:3,              // streak-save tokens
     candleRefillAt:null,    // timestamp of next refill (every 2 months)
     notifiedTiers:[],       // which 10-level badge tiers already triggered a friend-notify
-    examsPassed:[]          // which BADGE_TIERS thresholds have passed their milestone exam
+    examsPassed:[],         // which BADGE_TIERS thresholds have passed their milestone exam
+    lastViewedLevel:null    // last level opened — survives reload so the map returns you to it
   };
 }
 
@@ -1128,10 +1129,15 @@ function initState(){
   if(!progress.candleRefillAt) progress.candleRefillAt = Date.now() + TWO_MONTHS_MS;
   if(!progress.notifiedTiers) progress.notifiedTiers = [];
   if(!progress.examsPassed) progress.examsPassed = [];
+  if(progress.lastViewedLevel === undefined) progress.lastViewedLevel = null;
   profile = loadJSON(STORAGE.profile, null) || { name:'', pic:null };
   pendingProfilePic = profile.pic;
   customCards = loadJSON(STORAGE.customCards, null) || [];
   myProgress = loadJSON(STORAGE.myProgress, null) || defaultMyProgress();
+
+  // restore where the user last was on the map — survives reloads and accidental back-navigation
+  lastViewedLevel = progress.lastViewedLevel || null;
+  if(lastViewedLevel) currentMapGroup = Math.floor((lastViewedLevel - 1) / 10);
 
   // candle refill — every 2 months, top back up to 3
   if(Date.now() >= progress.candleRefillAt){
@@ -1464,6 +1470,10 @@ function closeExamResult(passed, threshold){
 function openLevel(lvl){
   if(!isUnlocked(lvl)) return;
   learnView = { screen:'study', level:lvl, cardIndex:0, flipped:false, testQuestions:null, testIndex:0, testAnswers:[] };
+  lastViewedLevel = lvl;
+  currentMapGroup = Math.floor((lvl - 1) / 10);
+  progress.lastViewedLevel = lvl;
+  saveJSON(STORAGE.progress, progress);
   renderLearn();
 }
 
@@ -1471,6 +1481,8 @@ function backToMap(){
   if(learnView.level){
     lastViewedLevel = learnView.level;
     currentMapGroup = Math.floor((learnView.level - 1) / 10);
+    progress.lastViewedLevel = learnView.level;
+    saveJSON(STORAGE.progress, progress);
   }
   learnView.screen = 'map';
   renderLearn();
